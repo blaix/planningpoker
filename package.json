@@ -1,0 +1,21 @@
+{
+  "name": "planningpoker",
+  "version": "0.1.0",
+  "description": "",
+  "scripts": {
+    "postinstall": "npx elm-tooling install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blaix/planningpoker.git"
+  },
+  "author": "Justin Blake",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/blaix/planningpoker/issues"
+  },
+  "homepage": "https://github.com/blaix/planningpoker#readme",
+  "devDependencies": {
+    "elm-tooling": "^1.9.0"
+  }
+}

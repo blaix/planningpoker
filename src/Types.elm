@@ -2,28 +2,38 @@ module Types exposing (..)
 
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
+import Dict exposing (Dict)
+import Lamdera exposing (SessionId)
 import Url exposing (Url)
 
 
 type alias FrontendModel =
     { key : Key
-    , message : String
+    , room : CurrentRoom
+    , userId : Maybe UserId
+    , pendingUserName : String
+    , pendingVote : String
     }
 
 
 type alias BackendModel =
-    { message : String
+    { rooms : Dict Slug Room
+    , idCounter : Int
+    , userIds : Dict SessionId UserId
     }
 
 
 type FrontendMsg
     = UrlClicked UrlRequest
     | UrlChanged Url
-    | NoOpFrontendMsg
-
-
-type ToBackend
-    = NoOpToBackend
+    | Clicked_CreateRoom
+    | Clicked_JoinRoom
+    | Clicked_Vote
+    | Clicked_RevealVotes
+    | Clicked_ResetVotes
+    | Clicked_LeaveRoom
+    | Changed_PendingName String
+    | Changed_PendingVote String
 
 
 type BackendMsg
@@ -31,4 +41,41 @@ type BackendMsg
 
 
 type ToFrontend
-    = NoOpToFrontend
+    = RoomCreated Room
+    | RoomUpdated Room
+    | GotCurrentRoom CurrentRoom
+    | GotUserId (Maybe UserId)
+
+
+type ToBackend
+    = CreateRoom
+    | UpdateRoom Room
+    | GetCurrentRoom String
+    | GetUserId
+
+
+type CurrentRoom
+    = CurrentRoom Room
+    | LoadingRoom
+    | RoomNotFound
+    | HomeRoom
+
+
+type alias Room =
+    { slug : Slug
+    , members : Dict UserId UserName
+    , votes : Dict UserId (Maybe Int)
+    , revealVotes : Bool
+    }
+
+
+type alias UserId =
+    String
+
+
+type alias UserName =
+    String
+
+
+type alias Slug =
+    String

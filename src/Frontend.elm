@@ -2,9 +2,11 @@ module Frontend exposing (..)
 
 import Browser exposing (UrlRequest(..))
 import Browser.Navigation as Nav
-import Html
+import Dict
+import Html exposing (Html)
 import Html.Attributes as Attr
-import Lamdera
+import Html.Events as Event
+import Lamdera exposing (sendToBackend)
 import Types exposing (..)
 import Url
 
@@ -13,6 +15,15 @@ type alias Model =
     FrontendModel
 
 
+app :
+    { init : Lamdera.Url -> Nav.Key -> ( Model, Cmd FrontendMsg )
+    , view : Model -> Browser.Document FrontendMsg
+    , update : FrontendMsg -> Model -> ( Model, Cmd FrontendMsg )
+    , updateFromBackend : ToFrontend -> Model -> ( Model, Cmd FrontendMsg )
+    , subscriptions : Model -> Sub FrontendMsg
+    , onUrlRequest : UrlRequest -> FrontendMsg
+    , onUrlChange : Url.Url -> FrontendMsg
+    }
 app =
     Lamdera.frontend
         { init = init
@@ -20,22 +31,46 @@ app =
         , onUrlChange = UrlChanged
         , update = update
         , updateFromBackend = updateFromBackend
-        , subscriptions = \m -> Sub.none
+        , subscriptions = \_ -> Sub.none
         , view = view
         }
 
 
 init : Url.Url -> Nav.Key -> ( Model, Cmd FrontendMsg )
 init url key =
+    let
+        slug =
+            String.dropLeft 1 url.path
+
+        ( currentRoom, getRoomMsg ) =
+            if slug == "" then
+                ( HomeRoom, Cmd.none )
+
+            else
+                ( LoadingRoom
+                , sendToBackend (GetCurrentRoom slug)
+                )
+    in
     ( { key = key
-      , message = "Welcome to Lamdera! You're looking at the auto-generated base implementation. Check out src/Frontend.elm to start coding!"
+      , room = currentRoom
+      , userId = Nothing
+      , pendingUserName = ""
+      , pendingVote = ""
       }
-    , Cmd.none
+    , Cmd.batch
+        [ sendToBackend GetUserId
+        , getRoomMsg
+        ]
     )
 
 
 update : FrontendMsg -> Model -> ( Model, Cmd FrontendMsg )
 update msg model =
+    -- FIXME: Race conditions :(
+    -- The current pattern of updating a room on the frontend
+    -- and then blasting that update to all clients could
+    -- overwrite another client's changes if they happen at
+    -- the same time.
     case msg of
         UrlClicked urlRequest ->
             case urlRequest of
@@ -49,31 +84,300 @@ update msg model =
                     , Nav.load url
                     )
 
-        UrlChanged url ->
+        UrlChanged _ ->
             ( model, Cmd.none )
 
-        NoOpFrontendMsg ->
-            ( model, Cmd.none )
+        Clicked_CreateRoom ->
+            ( { model | room = LoadingRoom }
+            , sendToBackend CreateRoom
+            )
+
+        Changed_PendingName name ->
+            ( { model | pendingUserName = name }
+            , Cmd.none
+            )
+
+        Changed_PendingVote vote ->
+            ( { model | pendingVote = vote }
+            , Cmd.none
+            )
+
+        Clicked_Vote ->
+            case ( model.room, model.userId ) of
+                ( CurrentRoom room, Just userId ) ->
+                    let
+                        vote =
+                            String.toInt model.pendingVote
+
+                        newVotes =
+                            room.votes
+                                |> Dict.insert userId vote
+
+                        newRoom =
+                            { room | votes = newVotes }
+                    in
+                    ( { model | room = CurrentRoom newRoom }
+                    , sendToBackend (UpdateRoom newRoom)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Clicked_JoinRoom ->
+            case ( model.room, model.userId ) of
+                ( CurrentRoom room, Just userId ) ->
+                    let
+                        newMembers =
+                            room.members
+                                |> Dict.insert userId model.pendingUserName
+
+                        newRoom =
+                            { room | members = newMembers }
+                    in
+                    ( { model | room = CurrentRoom newRoom }
+                    , sendToBackend (UpdateRoom newRoom)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Clicked_RevealVotes ->
+            case model.room of
+                CurrentRoom room ->
+                    let
+                        newRoom =
+                            { room | revealVotes = True }
+                    in
+                    ( { model | room = CurrentRoom newRoom }
+                    , sendToBackend (UpdateRoom newRoom)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Clicked_ResetVotes ->
+            case model.room of
+                CurrentRoom room ->
+                    let
+                        newRoom =
+                            { room
+                                | votes = Dict.empty
+                                , revealVotes = False
+                            }
+                    in
+                    ( { model | room = CurrentRoom newRoom }
+                    , sendToBackend (UpdateRoom newRoom)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Clicked_LeaveRoom ->
+            -- TODO: also remove user on disconnect
+            let
+                backendMsg =
+                    case ( model.room, model.userId ) of
+                        ( CurrentRoom room, Just userId ) ->
+                            let
+                                newRoom =
+                                    { room | members = Dict.remove userId room.members }
+                            in
+                            sendToBackend (UpdateRoom newRoom)
+
+                        _ ->
+                            Cmd.none
+            in
+            ( { model | room = HomeRoom }
+            , Cmd.batch
+                [ Nav.pushUrl model.key "/"
+                , backendMsg
+                ]
+            )
 
 
 updateFromBackend : ToFrontend -> Model -> ( Model, Cmd FrontendMsg )
 updateFromBackend msg model =
     case msg of
-        NoOpToFrontend ->
-            ( model, Cmd.none )
+        RoomCreated room ->
+            ( { model | room = CurrentRoom room }
+            , Nav.pushUrl model.key ("/" ++ room.slug)
+            )
+
+        RoomUpdated room ->
+            ( { model | room = updateCurrentRoom room model.room }
+            , Cmd.none
+            )
+
+        GotCurrentRoom currentRoom ->
+            ( { model | room = currentRoom }
+            , Cmd.none
+            )
+
+        GotUserId userId ->
+            ( { model | userId = userId }
+            , Cmd.none
+            )
+
+
+updateCurrentRoom : Room -> CurrentRoom -> CurrentRoom
+updateCurrentRoom newRoom currentRoom =
+    case currentRoom of
+        CurrentRoom room ->
+            if room.slug == newRoom.slug then
+                CurrentRoom newRoom
+
+            else
+                currentRoom
+
+        _ ->
+            currentRoom
 
 
 view : Model -> Browser.Document FrontendMsg
 view model =
     { title = ""
     , body =
-        [ Html.div [ Attr.style "text-align" "center", Attr.style "padding-top" "40px" ]
-            [ Html.img [ Attr.src "https://lamdera.app/lamdera-logo-black.png", Attr.width 150 ] []
-            , Html.div
-                [ Attr.style "font-family" "sans-serif"
-                , Attr.style "padding-top" "40px"
+        [ Html.node "link" [ Attr.rel "stylesheet", Attr.href "/styles.css" ] []
+        , Html.header []
+            [ Html.h1 [] [ Html.text "Planning Poker" ] ]
+        , Html.main_ []
+            [ case model.room of
+                HomeRoom ->
+                    viewHomeRoom model
+
+                RoomNotFound ->
+                    Html.div []
+                        [ Html.p [] [ Html.text "Uh oh! Can't find a room with that id." ]
+                        , viewHomeRoom model
+                        ]
+
+                LoadingRoom ->
+                    Html.text "Loading your room..."
+
+                CurrentRoom room ->
+                    viewRoom room model
+            ]
+        , Html.footer []
+            [ Html.div []
+                [ Html.text "Created by "
+                , Html.a [ Attr.href "https://twitter.com/blaix" ] [ Html.text "@blaix" ]
                 ]
-                [ Html.text model.message ]
+            , Html.div [ Attr.style "font-style" "italic" ]
+                [ Html.text "Super beta and probably buggy" ]
+            , Html.div []
+                [ Html.a [ Attr.href "https://github.com/blaix/planningpoker" ] [ Html.text "Source" ]
+                ]
             ]
         ]
     }
+
+
+viewHomeRoom : Model -> Html FrontendMsg
+viewHomeRoom model =
+    Html.button [ Event.onClick Clicked_CreateRoom ]
+        [ Html.text <|
+            if model.room == LoadingRoom then
+                "CREATING..."
+
+            else
+                "CREATE ROOM"
+        ]
+
+
+viewRoom : Room -> Model -> Html FrontendMsg
+viewRoom room model =
+    Html.div [ Attr.style "text-align" "center" ] <|
+        [ Html.h2 [] [ Html.text ("Room " ++ room.slug) ]
+        , Html.table [] <|
+            (Html.thead []
+                [ Html.tr []
+                    [ Html.th [] [ Html.text "Member" ]
+                    , Html.th [] [ Html.text "Points" ]
+                    ]
+                ]
+                :: (room.members
+                        |> Dict.toList
+                        |> List.sortBy Tuple.second
+                        |> List.map (viewMemberRow room model)
+                   )
+            )
+        , case model.userId of
+            Just userId ->
+                if Dict.member userId room.members then
+                    viewVoteForm
+
+                else
+                    viewJoinForm
+
+            _ ->
+                viewJoinForm
+        , Html.p [ Attr.class "btnGroup" ] <|
+            [ Html.button [ Event.onClick Clicked_RevealVotes ] [ Html.text "Reveal Votes" ]
+            , Html.button [ Event.onClick Clicked_ResetVotes ] [ Html.text "Reset Votes" ]
+
+            -- TODO: handle tab closing as Leaving
+            , Html.button [ Event.onClick Clicked_LeaveRoom ] [ Html.text "Leave Room" ]
+            ]
+        ]
+
+
+viewMemberRow : Room -> Model -> ( UserId, UserName ) -> Html FrontendMsg
+viewMemberRow room model ( userId, userName ) =
+    let
+        voteDisplay =
+            case Dict.get userId room.votes of
+                Nothing ->
+                    ""
+
+                Just Nothing ->
+                    ""
+
+                Just (Just vote) ->
+                    if Just userId == model.userId || room.revealVotes then
+                        String.fromInt vote
+
+                    else
+                        "✅"
+    in
+    Html.tr []
+        [ Html.td []
+            [ if Just userId == model.userId then
+                Html.strong [] [ Html.text userName ]
+
+              else
+                Html.text userName
+            ]
+        , Html.td [ Attr.style "text-align" "center" ] [ Html.text voteDisplay ]
+        ]
+
+
+viewJoinForm : Html FrontendMsg
+viewJoinForm =
+    Html.p []
+        [ Html.label [] [ Html.text "Your Name: " ]
+        , Html.input
+            [ Attr.type_ "text"
+            , Event.onInput Changed_PendingName
+            ]
+            []
+        , Html.button
+            [ Event.onClick Clicked_JoinRoom
+            ]
+            [ Html.text "Join" ]
+        ]
+
+
+viewVoteForm : Html FrontendMsg
+viewVoteForm =
+    Html.div []
+        [ Html.input
+            [ Attr.type_ "number"
+            , Event.onInput Changed_PendingVote
+            ]
+            []
+        , Html.button
+            [ Attr.class "primary"
+            , Event.onClick Clicked_Vote
+            ]
+            [ Html.text "Vote" ]
+        ]

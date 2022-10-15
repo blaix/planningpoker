@@ -64,7 +64,7 @@ type CurrentRoom
 type alias Room =
     { slug : Slug
     , members : Dict UserId UserName
-    , votes : Dict UserId (Maybe Int)
+    , votes : Dict UserId String
     , revealVotes : Bool
     }
 

@@ -106,12 +106,9 @@ update msg model =
             case ( model.room, model.userId ) of
                 ( CurrentRoom room, Just userId ) ->
                     let
-                        vote =
-                            String.toInt model.pendingVote
-
                         newVotes =
                             room.votes
-                                |> Dict.insert userId vote
+                                |> Dict.insert userId model.pendingVote
 
                         newRoom =
                             { room | votes = newVotes }
@@ -329,12 +326,9 @@ viewMemberRow room model ( userId, userName ) =
                 Nothing ->
                     ""
 
-                Just Nothing ->
-                    ""
-
-                Just (Just vote) ->
+                Just vote ->
                     if Just userId == model.userId || room.revealVotes then
-                        String.fromInt vote
+                        vote
 
                     else
                         "✅"

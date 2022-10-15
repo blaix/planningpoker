@@ -1,4 +1,4 @@
-- [ ] Don't convert votes to Ints. No reason.
+- [x] Don't convert votes to Ints. No reason.
 - [ ] Move room update logic to backend (with optimistic UI)
 - [ ] Track connected client ids. Hide member if they have no client ids in that room.
   - [ ] But keep the member in the room to show up again on reconnect

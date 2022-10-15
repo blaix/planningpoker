@@ -7,8 +7,10 @@ import Html exposing (Html)
 import Html.Attributes as Attr
 import Html.Events as Event
 import Lamdera exposing (sendToBackend)
+import Room exposing (CurrentRoom(..), Room)
 import Types exposing (..)
 import Url
+import User
 
 
 type alias Model =
@@ -53,7 +55,7 @@ init url key =
     in
     ( { key = key
       , room = currentRoom
-      , userId = Nothing
+      , userId = ""
       , pendingUserName = ""
       , pendingVote = ""
       }
@@ -66,11 +68,6 @@ init url key =
 
 update : FrontendMsg -> Model -> ( Model, Cmd FrontendMsg )
 update msg model =
-    -- FIXME: Race conditions :(
-    -- The current pattern of updating a room on the frontend
-    -- and then blasting that update to all clients could
-    -- overwrite another client's changes if they happen at
-    -- the same time.
     case msg of
         UrlClicked urlRequest ->
             case urlRequest of
@@ -103,30 +100,17 @@ update msg model =
             )
 
         Clicked_Vote ->
-            case ( model.room, model.userId ) of
-                ( CurrentRoom room, Just userId ) ->
-                    let
-                        newVotes =
-                            room.votes
-                                |> Dict.insert userId model.pendingVote
-
-                        newRoom =
-                            { room | votes = newVotes }
-                    in
-                    ( { model | room = CurrentRoom newRoom }
-                    , sendToBackend (UpdateRoom newRoom)
-                    )
-
-                _ ->
-                    ( model, Cmd.none )
+            ( { model | room = Room.vote model.room model.userId model.pendingVote }
+            , sendToBackend (Vote model.room model.userId model.pendingVote)
+            )
 
         Clicked_JoinRoom ->
-            case ( model.room, model.userId ) of
-                ( CurrentRoom room, Just userId ) ->
+            case model.room of
+                CurrentRoom room ->
                     let
                         newMembers =
                             room.members
-                                |> Dict.insert userId model.pendingUserName
+                                |> Dict.insert model.userId model.pendingUserName
 
                         newRoom =
                             { room | members = newMembers }
@@ -173,11 +157,11 @@ update msg model =
             -- TODO: also remove user on disconnect
             let
                 backendMsg =
-                    case ( model.room, model.userId ) of
-                        ( CurrentRoom room, Just userId ) ->
+                    case model.room of
+                        CurrentRoom room ->
                             let
                                 newRoom =
-                                    { room | members = Dict.remove userId room.members }
+                                    { room | members = Dict.remove model.userId room.members }
                             in
                             sendToBackend (UpdateRoom newRoom)
 
@@ -298,16 +282,11 @@ viewRoom room model =
                         |> List.map (viewMemberRow room model)
                    )
             )
-        , case model.userId of
-            Just userId ->
-                if Dict.member userId room.members then
-                    viewVoteForm
+        , if Dict.member model.userId room.members then
+            viewVoteForm
 
-                else
-                    viewJoinForm
-
-            _ ->
-                viewJoinForm
+          else
+            viewJoinForm
         , Html.p [ Attr.class "btnGroup" ] <|
             [ Html.button [ Event.onClick Clicked_RevealVotes ] [ Html.text "Reveal Votes" ]
             , Html.button [ Event.onClick Clicked_ResetVotes ] [ Html.text "Reset Votes" ]
@@ -318,7 +297,7 @@ viewRoom room model =
         ]
 
 
-viewMemberRow : Room -> Model -> ( UserId, UserName ) -> Html FrontendMsg
+viewMemberRow : Room -> Model -> ( User.Id, User.Name ) -> Html FrontendMsg
 viewMemberRow room model ( userId, userName ) =
     let
         voteDisplay =
@@ -327,7 +306,7 @@ viewMemberRow room model ( userId, userName ) =
                     ""
 
                 Just vote ->
-                    if Just userId == model.userId || room.revealVotes then
+                    if userId == model.userId || room.revealVotes then
                         vote
 
                     else
@@ -335,7 +314,7 @@ viewMemberRow room model ( userId, userName ) =
     in
     Html.tr []
         [ Html.td []
-            [ if Just userId == model.userId then
+            [ if userId == model.userId then
                 Html.strong [] [ Html.text userName ]
 
               else

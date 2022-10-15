@@ -4,22 +4,24 @@ import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
 import Lamdera exposing (SessionId)
+import Room exposing (CurrentRoom, Room)
 import Url exposing (Url)
+import User
 
 
 type alias FrontendModel =
     { key : Key
     , room : CurrentRoom
-    , userId : Maybe UserId
+    , userId : User.Id
     , pendingUserName : String
     , pendingVote : String
     }
 
 
 type alias BackendModel =
-    { rooms : Dict Slug Room
+    { rooms : Dict Room.Slug Room
     , idCounter : Int
-    , userIds : Dict SessionId UserId
+    , userIds : Dict SessionId User.Id
     }
 
 
@@ -44,38 +46,12 @@ type ToFrontend
     = RoomCreated Room
     | RoomUpdated Room
     | GotCurrentRoom CurrentRoom
-    | GotUserId (Maybe UserId)
+    | GotUserId User.Id
 
 
 type ToBackend
     = CreateRoom
     | UpdateRoom Room
+    | Vote CurrentRoom User.Id String
     | GetCurrentRoom String
     | GetUserId
-
-
-type CurrentRoom
-    = CurrentRoom Room
-    | LoadingRoom
-    | RoomNotFound
-    | HomeRoom
-
-
-type alias Room =
-    { slug : Slug
-    , members : Dict UserId UserName
-    , votes : Dict UserId String
-    , revealVotes : Bool
-    }
-
-
-type alias UserId =
-    String
-
-
-type alias UserName =
-    String
-
-
-type alias Slug =
-    String

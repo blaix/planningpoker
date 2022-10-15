@@ -3,7 +3,9 @@ module Backend exposing (..)
 import Dict
 import Hashids as Hash
 import Lamdera exposing (ClientId, SessionId, broadcast, sendToFrontend)
+import Room exposing (CurrentRoom(..), Room)
 import Types exposing (..)
+import User
 
 
 type alias Model =
@@ -69,6 +71,16 @@ updateFromFrontend sessionId clientId msg model =
             , broadcast (RoomUpdated room)
             )
 
+        Vote currentRoom userId vote ->
+            case Room.vote currentRoom userId vote of
+                CurrentRoom room ->
+                    ( { model | rooms = Dict.insert room.slug room model.rooms }
+                    , broadcast (RoomUpdated room)
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         GetCurrentRoom slug ->
             let
                 room =
@@ -89,7 +101,7 @@ updateFromFrontend sessionId clientId msg model =
                         Nothing ->
                             createUserId sessionId model
             in
-            ( newModel, sendToFrontend clientId (GotUserId (Just newUserId)) )
+            ( newModel, sendToFrontend clientId (GotUserId newUserId) )
 
 
 createRoom : Model -> ( Room, Model )
@@ -112,7 +124,7 @@ createRoom model =
     )
 
 
-createUserId : SessionId -> Model -> ( UserId, Model )
+createUserId : SessionId -> Model -> ( User.Id, Model )
 createUserId sessionId model =
     let
         newCounter =
